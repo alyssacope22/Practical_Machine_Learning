@@ -1,0 +1,234 @@
+---
+title: 'Practical Machine Learning: Prediction Assignment Write-Up'
+author: "Alyssa Copeland"
+date: "February 24, 2018"
+output: html_document
+---
+
+#Overview
+
+This assignment is the final peer assignment report from the Coursera's course through Johns Hopkins University called Practical Machine Learning as part of the Specialization in Data Science.  It was built up in R Studio, using R Markdown and knitr functions, and it will be published in html format.  The data is from accelerometers, and the goal of the project is to predict the manner in which 6 participants performed some exercise as described below. This is the "classe" variable in the training set.     
+
+#Background Information
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+http://groupware.les.inf.puc-rio.br/har  More information 
+
+#Data Loading
+
+The training data for this project are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data is from these others and article study:
+
+Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. "Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13)". Stuttgart, Germany: ACM SIGCHI, 2013.
+
+A short description of the datasets content from the authors' website:
+
+"This human activity recognition research has traditionally focused on discriminating between different activities, i.e. to predict "which" activity was performed at a specific point in time (like with the Daily Living Activities dataset above). The approach we propose for the Weight Lifting Exercises dataset is to investigate "how (well)" an activity was performed by the wearer. The "how (well)" investigation has only received little attention so far, even though it potentially provides useful information for a large variety of applications,such as sports training.
+
+Six young health participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E).
+
+Class A corresponds to the specified execution of the exercise, while the other 4 classes correspond to common mistakes. Participants were supervised by an experienced weight lifter to make sure the execution complied to the manner they were supposed to simulate. The exercises were performed by six male participants aged between 20-28 years, with little weight lifting experience. We made sure that all participants could easily simulate the mistakes in a safe and controlled manner by using a relatively light dumbbell (1.25kg)."
+
+##Prepping the Environment
+
+First, I will upload the R libraries that are necessary for the complete analysis.
+
+```{r, loading libraries}
+rm(list=ls())
+require(knitr)
+require(caret)
+require(rpart)
+require(rpart.plot)
+require(rattle)
+require(randomForest)
+require(corrplot)
+set.seed(12345)
+```
+
+##Loading and Cleaning Accelerometer Data
+
+The next step is to load the dataset from the URL provided.  The dataset is then partitioned into a training set (containing 70% of the data) for the modeling process and a test set (containing the remaining 30% of the data) for validations.  
+
+```{r uploading data}
+# set the URL for the download
+train0<-"http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+test0<-"http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+# download the datasets
+train<-read.csv(url(train0))
+test<-read.csv(url(test0))
+
+# create a partition with the training dataset 
+intrain<- createDataPartition(train$classe,p=0.7,list=FALSE)
+train1<-train[intrain,]
+test1<-train[-intrain,]
+dim(train1)
+dim(test1)
+
+```
+
+With these new data sets, there are plenty of variables that contain NAs, and to run statistical analyses they will be removed.  I will use the Near Zero Variance to remove variables that  have very little difference between them.  This is because they are variables that will not explain any relationships or correlations.
+
+```{r removing variables from data sets}
+nzv<-nearZeroVar(train1)
+train1<-train1[,-nzv]
+test1<-test1[,-nzv]
+
+dim(train1)
+dim(test1)
+```
+Now, variables that contain a majority of NAs, will be removed from the data sets.
+
+```{r removing NAs from data sets}
+na<-sapply(train1,function(x) mean(is.na(x)))>0.95
+train1<-train1[,na==FALSE]
+test1<-test1[,na==FALSE]
+
+dim(train1)
+dim(test1)
+```
+```{r remove ID only variables}
+##remove identification only variables
+train1<-train1[,-(1:5)]
+test1<-test1[,-(1:5)]
+
+dim(train1)
+dim(test1)
+
+```
+
+With the  cleaning process now deleted, various analyses can be done to look at the data and explore the method used.
+
+##Correlation Plot Analysis
+
+A correlation among variables are analyzed to see what variables are correlated and where they are not before predictive modeling is done.
+
+```{r correlation plot}
+cormat<-cor(train1[,-54])
+corrplot(cormat,order="FPC",method="color",type="lower",
+         tl.cex=0.7,tl.col=rgb(0,0,0))
+```
+
+Looking at the correlation plot with all of the variables, the squares in red indicate a negative correlation, and the squares in blue indicate a positive correlation.  The highest negative correlation seem to be clustering in the bottom left going from magnet_forearm z to accel_belt_y.  The more positive correlation are occuring in the corners of the triangle opposing the negative correlation clusters.
+
+#Predictive Model Building
+
+In order figure out what method was used for predictive modeling, I will use three methods to model the regression using the training data set.  The model with the highest accuracy will be applied to the test data set for the quiz predictions and validations.  The methods that will be used for predictive modelings are: Decision Tree, Generalized Boosted Model, and Random Forests.
+
+##Method: Decision Tree
+```{r decision tree}
+set.seed(12345)
+modtree<-rpart(classe~.,data=train1,method="class")
+fancyRpartPlot(modtree)
+
+```
+```{r prediction of decision tree}
+predtree<-predict(modtree,newdata=test1,type="class")
+confmattree<-confusionMatrix(predtree,test1$classe)
+confmattree
+```
+
+The Decision Tree Predictive Modeling output shows to have an accuracy of 71.9% and a p-value of <2.2e-16.  There are misclassification rates of this model are about 28.1% for the classes.  To visualize the results, I will plot the matrix of the accuracy of this predictive model.
+
+```{r plotting tree matrix results}
+plot(confmattree$table,col=confmattree$byClass,
+     main=paste("Decision Tree - Accuracy = ",
+                round(confmattree$overall['Accuracy'],4)))
+```
+
+##Method: Generalized Boosed Model
+```{r generalized boosted model}
+set.seed(12345)
+control<-trainControl(method="repeatedcv",number=5,repeats = 1)
+modgbm<-train(classe~.,data=train1,method="gbm",trControl=control,
+              verbose=F)
+modgbm$finalModel
+
+```
+
+```{r generalized boosted model tested}
+predgbm<-predict(modgbm,newdata=test1)
+confmatgbm<-confusionMatrix(predgbm,test1$classe)
+confmatgbm
+```
+
+Looking at the predictive modeling output for the generalized boosted model, the accuracy for this model with the data set is 98.7% with a p-value of <2.2e-16.  The misclassification rate of this model is 1.3%.
+
+Again, to visualize the model, I will plot the matrix of the model.
+
+```{r gbm model plot}
+plot(confmatgbm$table,col=confmatgbm$byClass,
+     main=paste("GBM - Accuracy = ",round(confmatgbm$overall['Accuracy'],4)))
+
+```
+
+##Method: Random Forest
+
+```{r random forest}
+set.seed(12345)
+controlRF<-trainControl(method="cv",number=3,verboseIter = F)
+modrandom<-train(classe~.,data=train1,method="rf",
+                 trControl=controlRF)
+modrandom$finalModel
+
+```
+
+```{r predictive model of random forest}
+predrf<-predict(modrandom,newdata=test1)
+confmatrf<-confusionMatrix(predrf,test1$classe)
+confmatrf
+
+```
+
+Looking at the output of the random forest predictive model, the accuracy of the model is 99.8% with a p-value of <2.2e-16.  The misclassification rate is 0.2%.
+
+To better visualize the model, I will plot the matrix predictive model.
+
+```{r random forest matrix}
+plot(confmatrf$table,col=confmatrf$byClass,
+     main=paste("Random Forest - Accuracy =",
+                round(confmatrf$overall['Accuracy'],4)))
+
+```
+
+#Selecting a Method for Modeling to the Test Data
+
+The accuracy of the 3 regression modeling methods above are:
+
+a. Decision Tree: 0.7193
+b. Generalized Boosted Model: 0.9866
+c. Random Forest: 0.9983
+
+In comparing all 3 methods, the method used is determined to be the Random Forest because the accuracy of the model is the highest.  Due, to this, this method will be applied to predict the 20 quiz results (testing  dataset) as shown below.
+
+```{r prediction of test data 20}
+predtest<-predict(modrandom,newdata=test)
+predtest
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
